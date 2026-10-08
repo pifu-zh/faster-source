@@ -30,6 +30,31 @@ class Config:
     mirrors: tuple[Mirror, ...]
 
 
+@dataclass(frozen=True)
+class ProbeResult:
+    mirror: Mirror
+    http_code: int
+    time_total: float
+    body: str
+    returncode: int
+
+
+def is_valid(result: ProbeResult, suite: str) -> bool:
+    if result.returncode != 0 or result.http_code != 200:
+        return False
+    needle = f"Codename: {suite}"
+    return any(line.strip() == needle for line in result.body.splitlines())
+
+
+def select_winner(results: list[ProbeResult], config: Config) -> ProbeResult | None:
+    order = {mirror.name: index for index, mirror in enumerate(config.mirrors)}
+    valid = [result for result in results if is_valid(result, config.suite)]
+    if not valid:
+        return None
+    valid.sort(key=lambda result: (result.time_total, order.get(result.mirror.name, 10**9)))
+    return valid[0]
+
+
 def probe_url(mirror: Mirror, suite: str) -> str:
     return f"{mirror.baseurl}/dists/{suite}/InRelease"
 
