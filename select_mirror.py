@@ -3,7 +3,14 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import tempfile
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -59,6 +66,107 @@ def select_winner(results: list[ProbeResult], config: Config) -> ProbeResult | N
 
 def probe_url(mirror: Mirror, suite: str) -> str:
     return f"{mirror.baseurl}/dists/{suite}/InRelease"
+
+
+def build_curl_command(mirror: Mirror, config: Config, output_path: str) -> list[str]:
+    return [
+        "curl",
+        "--silent",
+        "--show-error",
+        "--max-redirs",
+        "0",
+        "--connect-timeout",
+        str(config.probe.connect_timeout_sec),
+        "--max-time",
+        str(config.probe.max_time_sec),
+        "--output",
+        output_path,
+        "--write-out",
+        "%{http_code} %{time_total}",
+        probe_url(mirror, config.suite),
+    ]
+
+
+def parse_write_out(stdout: str) -> tuple[int, float]:
+    parts = stdout.split()
+    if len(parts) != 2:
+        return 0, float("inf")
+    try:
+        return int(parts[0]), float(parts[1])
+    except ValueError:
+        return 0, float("inf")
+
+
+class CurlSession:
+    def __init__(self) -> None:
+        self._procs: list[subprocess.Popen] = []
+        self._lock = threading.Lock()
+
+    def add(self, proc: subprocess.Popen) -> None:
+        with self._lock:
+            self._procs.append(proc)
+
+    def kill_all(self) -> None:
+        with self._lock:
+            for proc in self._procs:
+                if proc.poll() is None:
+                    proc.kill()
+
+
+def make_curl_runner(config: Config, session: CurlSession) -> Callable[[Mirror], ProbeResult]:
+    def runner(mirror: Mirror) -> ProbeResult:
+        handle = tempfile.NamedTemporaryFile(prefix=f"fs-{mirror.name}-", delete=False)
+        output_path = handle.name
+        handle.close()
+        command = build_curl_command(mirror, config, output_path)
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        session.add(proc)
+        stdout, _stderr = proc.communicate()
+        try:
+            body = open(output_path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            body = ""
+        finally:
+            try:
+                os.unlink(output_path)
+            except OSError:
+                pass
+        http_code, time_total = parse_write_out(stdout or "")
+        return ProbeResult(
+            mirror=mirror,
+            http_code=http_code,
+            time_total=time_total,
+            body=body,
+            returncode=proc.returncode if proc.returncode is not None else 1,
+        )
+
+    return runner
+
+
+def probe_all(
+    config: Config,
+    runner: Callable[[Mirror], ProbeResult],
+    clock: Callable[[], float] = time.monotonic,
+    on_timeout: Callable[[], None] = lambda: None,
+) -> list[ProbeResult]:
+    start = clock()
+    limit = config.probe.deadline_sec - 0.2
+    pool = ThreadPoolExecutor(max_workers=max(1, len(config.mirrors)))
+    try:
+        futures = [pool.submit(runner, mirror) for mirror in config.mirrors]
+        remaining = limit - (clock() - start)
+        done, not_done = wait(futures, timeout=max(0.0, remaining))
+        if not_done:
+            on_timeout()
+        results = []
+        for future in done:
+            try:
+                results.append(future.result())
+            except Exception:
+                continue
+        return results
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 _DEB_RE = re.compile(r"^(?P<type>deb(?:-src)?)(?P<sp>\s+)(?P<uri>\S+)(?P<rest>\s+.*)$")

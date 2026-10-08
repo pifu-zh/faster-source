@@ -1,10 +1,16 @@
+import threading
 import unittest
 
 from select_mirror import (
+    Config,
     ConfigError,
     Mirror,
+    ProbeConfig,
     ProbeResult,
+    build_curl_command,
     load_config,
+    parse_write_out,
+    probe_all,
     probe_url,
     rewrite_sources,
     select_winner,
@@ -148,6 +154,58 @@ deb https://mirrors.aliyun.com/ubuntu/ jammy multiverse
         text, changed = rewrite_sources(original, mirrors, mirrors[0])
         self.assertFalse(changed)
         self.assertEqual(text, original)
+
+
+class ProbeAllTest(unittest.TestCase):
+    def test_curl_command_matches_spec(self):
+        config = load_config(SAMPLE)
+        command = build_curl_command(config.mirrors[0], config, "/tmp/inrelease")
+        self.assertEqual(
+            command,
+            [
+                "curl",
+                "--silent",
+                "--show-error",
+                "--max-redirs",
+                "0",
+                "--connect-timeout",
+                "1",
+                "--max-time",
+                "2",
+                "--output",
+                "/tmp/inrelease",
+                "--write-out",
+                "%{http_code} %{time_total}",
+                "https://mirrors.aliyun.com/ubuntu/dists/jammy/InRelease",
+            ],
+        )
+
+    def test_parse_write_out(self):
+        self.assertEqual(parse_write_out("200 0.116475\n"), (200, 0.116475))
+        self.assertEqual(parse_write_out(""), (0, float("inf")))
+
+    def test_deadline_drops_unfinished_probe(self):
+        release = threading.Event()
+        timed_out = threading.Event()
+        config = Config(
+            suite="jammy",
+            probe=ProbeConfig(1, 2, 1),
+            mirrors=(
+                Mirror("aliyun", "https://mirrors.aliyun.com/ubuntu"),
+                Mirror("official", "http://archive.ubuntu.com/ubuntu"),
+            ),
+        )
+
+        def runner(mirror):
+            if mirror.name == "official":
+                release.wait(2)
+                return _result(mirror.name, mirror.baseurl, 9.0)
+            return _result(mirror.name, mirror.baseurl, 0.1)
+
+        results = probe_all(config, runner, clock=lambda: 0.0, on_timeout=timed_out.set)
+        release.set()
+        self.assertTrue(timed_out.is_set())
+        self.assertEqual([result.mirror.name for result in results], ["aliyun"])
 
 
 if __name__ == "__main__":
