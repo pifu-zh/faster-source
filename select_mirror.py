@@ -110,7 +110,10 @@ class CurlSession:
         with self._lock:
             for proc in self._procs:
                 if proc.poll() is None:
-                    proc.kill()
+                    try:
+                        proc.kill()
+                    except OSError:
+                        continue
 
 
 def make_curl_runner(config: Config, session: CurlSession) -> Callable[[Mirror], ProbeResult]:
@@ -157,7 +160,10 @@ def probe_all(
         remaining = limit - (clock() - start)
         done, not_done = wait(futures, timeout=max(0.0, remaining))
         if not_done:
-            on_timeout()
+            try:
+                on_timeout()
+            except OSError:
+                pass
         results = []
         for future in done:
             try:

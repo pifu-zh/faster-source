@@ -4,6 +4,7 @@ import unittest
 from select_mirror import (
     Config,
     ConfigError,
+    CurlSession,
     Mirror,
     ProbeConfig,
     ProbeResult,
@@ -206,6 +207,53 @@ class ProbeAllTest(unittest.TestCase):
         release.set()
         self.assertTrue(timed_out.is_set())
         self.assertEqual([result.mirror.name for result in results], ["aliyun"])
+
+    def test_timeout_callback_error_keeps_finished_probe(self):
+        release = threading.Event()
+        config = Config(
+            suite="jammy",
+            probe=ProbeConfig(1, 2, 1),
+            mirrors=(
+                Mirror("aliyun", "https://mirrors.aliyun.com/ubuntu"),
+                Mirror("official", "http://archive.ubuntu.com/ubuntu"),
+            ),
+        )
+
+        def runner(mirror):
+            if mirror.name == "official":
+                release.wait(2)
+                return _result(mirror.name, mirror.baseurl, 9.0)
+            return _result(mirror.name, mirror.baseurl, 0.1)
+
+        def on_timeout():
+            raise ProcessLookupError(1, "No such process")
+
+        results = probe_all(config, runner, clock=lambda: 0.0, on_timeout=on_timeout)
+        release.set()
+        self.assertEqual([result.mirror.name for result in results], ["aliyun"])
+
+    def test_kill_all_continues_after_process_lookup_error(self):
+        class FakeProc:
+            def __init__(self, kill_error=None):
+                self._kill_error = kill_error
+                self.kill_called = False
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                self.kill_called = True
+                if self._kill_error is not None:
+                    raise self._kill_error
+
+        first = FakeProc(ProcessLookupError(1, "No such process"))
+        second = FakeProc()
+        session = CurlSession()
+        session.add(first)
+        session.add(second)
+        session.kill_all()
+        self.assertTrue(first.kill_called)
+        self.assertTrue(second.kill_called)
 
 
 if __name__ == "__main__":
