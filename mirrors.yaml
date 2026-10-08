@@ -1,0 +1,20 @@
+suite: jammy
+probe:
+  connect_timeout_sec: 1
+  max_time_sec: 2
+  deadline_sec: 5
+mirrors:
+  - name: aliyun
+    baseurl: https://mirrors.aliyun.com/ubuntu
+  - name: huaweicloud
+    baseurl: https://repo.huaweicloud.com/ubuntu
+  - name: tencent
+    baseurl: https://mirrors.cloud.tencent.com/ubuntu
+  - name: bfsu
+    baseurl: https://mirrors.bfsu.edu.cn/ubuntu
+  - name: ustc
+    baseurl: https://mirrors.ustc.edu.cn/ubuntu
+  - name: tuna
+    baseurl: https://mirrors.tuna.tsinghua.edu.cn/ubuntu
+  - name: official
+    baseurl: http://archive.ubuntu.com/ubuntu
