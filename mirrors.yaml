@@ -1,20 +1,353 @@
-suite: jammy
 probe:
   connect_timeout_sec: 1
   max_time_sec: 2
   deadline_sec: 5
-mirrors:
-  - name: aliyun
-    baseurl: https://mirrors.aliyun.com/ubuntu
-  - name: huaweicloud
-    baseurl: https://repo.huaweicloud.com/ubuntu
-  - name: tencent
-    baseurl: https://mirrors.cloud.tencent.com/ubuntu
-  - name: bfsu
-    baseurl: https://mirrors.bfsu.edu.cn/ubuntu
-  - name: ustc
-    baseurl: https://mirrors.ustc.edu.cn/ubuntu
-  - name: tuna
-    baseurl: https://mirrors.tuna.tsinghua.edu.cn/ubuntu
-  - name: official
-    baseurl: http://archive.ubuntu.com/ubuntu
+release:
+  - etc
+  - os-release
+distros:
+  - id: kali
+    match: kali
+    suite_keys: VERSION_CODENAME
+    probe_path: dists/{suite}/InRelease
+    marker: "Codename: {suite}"
+    bases: http://http.kali.org/kali https://http.kali.org/kali
+    sources: etc apt sources.list
+    also: sources.list.d
+    mirrors:
+      - name: kali-aliyun
+        baseurl: https://mirrors.aliyun.com/kali
+      - name: kali-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/kali
+      - name: kali-ustc
+        baseurl: https://mirrors.ustc.edu.cn/kali
+      - name: kali-huawei
+        baseurl: https://repo.huaweicloud.com/kali
+      - name: kali-official
+        baseurl: http://http.kali.org/kali
+  - id: opensuse-tumbleweed
+    match: opensuse-tumbleweed
+    suite: rolling
+    probe_path: tumbleweed/repo/oss/repodata/repomd.xml
+    marker: repomd
+    bases: https://download.opensuse.org/tumbleweed http://download.opensuse.org/tumbleweed
+    sources: etc zypp repos.d
+    mirrors:
+      - name: tumbleweed-aliyun
+        baseurl: https://mirrors.aliyun.com/opensuse/tumbleweed
+      - name: tumbleweed-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/opensuse/tumbleweed
+      - name: tumbleweed-ustc
+        baseurl: https://mirrors.ustc.edu.cn/opensuse/tumbleweed
+      - name: tumbleweed-official
+        baseurl: https://download.opensuse.org/tumbleweed
+  - id: opensuse-leap
+    match: opensuse-leap opensuse
+    suite_keys: VERSION_ID
+    probe_path: distribution/leap/{suite}/repo/oss/repodata/repomd.xml
+    marker: repomd
+    bases: https://download.opensuse.org/distribution/leap http://download.opensuse.org/distribution/leap
+    sources: etc zypp repos.d
+    mirrors:
+      - name: leap-aliyun
+        baseurl: https://mirrors.aliyun.com/opensuse
+      - name: leap-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/opensuse
+      - name: leap-ustc
+        baseurl: https://mirrors.ustc.edu.cn/opensuse
+      - name: leap-huawei
+        baseurl: https://repo.huaweicloud.com/opensuse
+      - name: leap-tencent
+        baseurl: https://mirrors.cloud.tencent.com/opensuse
+      - name: leap-official
+        baseurl: https://download.opensuse.org
+  - id: rocky
+    match: rocky
+    suite_keys: VERSION_ID
+    probe_path: "{suite}/BaseOS/source/tree/repodata/repomd.xml"
+    marker: repomd
+    bases: https://download.rockylinux.org/pub/rocky http://download.rockylinux.org/pub/rocky
+    sources: etc yum.repos.d
+    mirrors:
+      - name: rocky-aliyun
+        baseurl: https://mirrors.aliyun.com/rockylinux
+      - name: rocky-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/rockylinux
+      - name: rocky-ustc
+        baseurl: https://mirrors.ustc.edu.cn/rockylinux
+      - name: rocky-huawei
+        baseurl: https://repo.huaweicloud.com/rockylinux
+      - name: rocky-tencent
+        baseurl: https://mirrors.cloud.tencent.com/rockylinux
+      - name: rocky-official
+        baseurl: https://download.rockylinux.org/pub/rocky
+  - id: alma
+    match: almalinux
+    suite_keys: VERSION_ID
+    probe_path: "{suite}/BaseOS/source/tree/repodata/repomd.xml"
+    marker: repomd
+    bases: https://repo.almalinux.org/almalinux http://repo.almalinux.org/almalinux
+    sources: etc yum.repos.d
+    mirrors:
+      - name: alma-aliyun
+        baseurl: https://mirrors.aliyun.com/almalinux
+      - name: alma-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/almalinux
+      - name: alma-ustc
+        baseurl: https://mirrors.ustc.edu.cn/almalinux
+      - name: alma-huawei
+        baseurl: https://repo.huaweicloud.com/almalinux
+      - name: alma-official
+        baseurl: https://repo.almalinux.org/almalinux
+  - id: fedora
+    match: fedora
+    suite_keys: VERSION_ID
+    probe_path: releases/{suite}/Everything/source/tree/repodata/repomd.xml
+    marker: repomd
+    bases: https://download.fedoraproject.org/pub/fedora/linux http://download.fedoraproject.org/pub/fedora/linux
+    sources: etc yum.repos.d
+    mirrors:
+      - name: fedora-aliyun
+        baseurl: https://mirrors.aliyun.com/fedora
+      - name: fedora-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/fedora
+      - name: fedora-ustc
+        baseurl: https://mirrors.ustc.edu.cn/fedora
+      - name: fedora-huawei
+        baseurl: https://repo.huaweicloud.com/fedora
+      - name: fedora-tencent
+        baseurl: https://mirrors.cloud.tencent.com/fedora
+      - name: fedora-bfsu
+        baseurl: https://mirrors.bfsu.edu.cn/fedora
+      - name: fedora-sjtu
+        baseurl: https://mirror.sjtu.edu.cn/fedora
+      - name: fedora-nju
+        baseurl: https://mirrors.nju.edu.cn/fedora
+      - name: fedora-official
+        baseurl: https://download.fedoraproject.org/pub/fedora/linux
+  - id: arch
+    match: arch
+    suite: rolling
+    probe_path: lastupdate
+    marker: digits
+    bases: https://geo.mirror.pkgbuild.com https://mirror.pkgbuild.com http://mirror.pkgbuild.com
+    sources: etc pacman.d mirrorlist
+    mirrors:
+      - name: arch-aliyun
+        baseurl: https://mirrors.aliyun.com/archlinux
+      - name: arch-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/archlinux
+      - name: arch-ustc
+        baseurl: https://mirrors.ustc.edu.cn/archlinux
+      - name: arch-huawei
+        baseurl: https://repo.huaweicloud.com/archlinux
+      - name: arch-tencent
+        baseurl: https://mirrors.cloud.tencent.com/archlinux
+      - name: arch-bfsu
+        baseurl: https://mirrors.bfsu.edu.cn/archlinux
+      - name: arch-sjtu
+        baseurl: https://mirror.sjtu.edu.cn/archlinux
+      - name: arch-nju
+        baseurl: https://mirrors.nju.edu.cn/archlinux
+      - name: arch-zju
+        baseurl: https://mirrors.zju.edu.cn/archlinux
+      - name: arch-official
+        baseurl: https://geo.mirror.pkgbuild.com
+  - id: alpine
+    match: alpine
+    suite_keys: VERSION_ID
+    probe_path: v{suite}/main/
+    marker: any
+    bases: https://dl-cdn.alpinelinux.org/alpine http://dl-cdn.alpinelinux.org/alpine
+    sources: etc apk repositories
+    mirrors:
+      - name: alpine-aliyun
+        baseurl: https://mirrors.aliyun.com/alpine
+      - name: alpine-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/alpine
+      - name: alpine-ustc
+        baseurl: https://mirrors.ustc.edu.cn/alpine
+      - name: alpine-huawei
+        baseurl: https://repo.huaweicloud.com/alpine
+      - name: alpine-tencent
+        baseurl: https://mirrors.cloud.tencent.com/alpine
+      - name: alpine-official
+        baseurl: https://dl-cdn.alpinelinux.org/alpine
+  - id: debian
+    match: debian raspbian
+    suite_keys: VERSION_CODENAME
+    probe_path: dists/{suite}/InRelease
+    marker: "Codename: {suite}"
+    bases: http://deb.debian.org/debian https://deb.debian.org/debian http://ftp.debian.org/debian https://ftp.debian.org/debian
+    sources: etc apt sources.list
+    also: sources.list.d
+    mirrors:
+      - name: debian-aliyun
+        baseurl: https://mirrors.aliyun.com/debian
+      - name: debian-huawei
+        baseurl: https://repo.huaweicloud.com/debian
+      - name: debian-tencent
+        baseurl: https://mirrors.cloud.tencent.com/debian
+      - name: debian-bfsu
+        baseurl: https://mirrors.bfsu.edu.cn/debian
+      - name: debian-ustc
+        baseurl: https://mirrors.ustc.edu.cn/debian
+      - name: debian-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/debian
+      - name: debian-sjtu
+        baseurl: https://mirror.sjtu.edu.cn/debian
+      - name: debian-pku
+        baseurl: https://mirrors.pku.edu.cn/debian
+      - name: debian-nju
+        baseurl: https://mirrors.nju.edu.cn/debian
+      - name: debian-zju
+        baseurl: https://mirrors.zju.edu.cn/debian
+      - name: debian-hit
+        baseurl: https://mirrors.hit.edu.cn/debian
+      - name: debian-lzu
+        baseurl: https://mirror.lzu.edu.cn/debian
+      - name: debian-jlu
+        baseurl: https://mirrors.jlu.edu.cn/debian
+      - name: debian-netease
+        baseurl: https://mirrors.163.com/debian
+      - name: debian-official
+        baseurl: https://deb.debian.org/debian
+      - name: debian-ftp
+        baseurl: https://ftp.debian.org/debian
+      - name: debian-us
+        baseurl: http://ftp.us.debian.org/debian
+      - name: debian-de
+        baseurl: http://ftp.de.debian.org/debian
+      - name: debian-uk
+        baseurl: http://ftp.uk.debian.org/debian
+      - name: debian-jp
+        baseurl: http://ftp.jp.debian.org/debian
+      - name: debian-kr
+        baseurl: http://ftp.kr.debian.org/debian
+      - name: debian-cn
+        baseurl: http://ftp.cn.debian.org/debian
+      - name: debian-waterloo
+        baseurl: https://mirror.csclub.uwaterloo.ca/debian
+      - name: debian-ocf
+        baseurl: https://mirrors.ocf.berkeley.edu/debian
+      - name: debian-riken
+        baseurl: https://ftp.riken.jp/Linux/debian
+      - name: debian-jaist
+        baseurl: https://ftp.jaist.ac.jp/pub/Linux/debian
+      - name: debian-fau
+        baseurl: https://ftp.fau.de/debian
+      - name: debian-yandex
+        baseurl: https://mirror.yandex.ru/debian
+      - name: debian-wikimedia
+        baseurl: https://mirrors.wikimedia.org/debian
+      - name: debian-kernel
+        baseurl: https://mirrors.kernel.org/debian
+  - id: ubuntu
+    match: ubuntu linuxmint pop elementary neon zorin linuxlite
+    suite_keys: UBUNTU_CODENAME VERSION_CODENAME
+    probe_path: dists/{suite}/InRelease
+    marker: "Codename: {suite}"
+    bases: http://archive.ubuntu.com/ubuntu https://archive.ubuntu.com/ubuntu http://security.ubuntu.com/ubuntu https://security.ubuntu.com/ubuntu
+    sources: etc apt sources.list
+    also: sources.list.d
+    mirrors:
+      - name: ubuntu-aliyun
+        baseurl: https://mirrors.aliyun.com/ubuntu
+      - name: ubuntu-huawei
+        baseurl: https://repo.huaweicloud.com/ubuntu
+      - name: ubuntu-tencent
+        baseurl: https://mirrors.cloud.tencent.com/ubuntu
+      - name: ubuntu-bfsu
+        baseurl: https://mirrors.bfsu.edu.cn/ubuntu
+      - name: ubuntu-ustc
+        baseurl: https://mirrors.ustc.edu.cn/ubuntu
+      - name: ubuntu-tuna
+        baseurl: https://mirrors.tuna.tsinghua.edu.cn/ubuntu
+      - name: ubuntu-sjtu
+        baseurl: https://mirror.sjtu.edu.cn/ubuntu
+      - name: ubuntu-pku
+        baseurl: https://mirrors.pku.edu.cn/ubuntu
+      - name: ubuntu-hit
+        baseurl: https://mirrors.hit.edu.cn/ubuntu
+      - name: ubuntu-nju
+        baseurl: https://mirrors.nju.edu.cn/ubuntu
+      - name: ubuntu-zju
+        baseurl: https://mirrors.zju.edu.cn/ubuntu
+      - name: ubuntu-lzu
+        baseurl: https://mirror.lzu.edu.cn/ubuntu
+      - name: ubuntu-jlu
+        baseurl: https://mirrors.jlu.edu.cn/ubuntu
+      - name: ubuntu-hust
+        baseurl: https://mirrors.hust.edu.cn/ubuntu
+      - name: ubuntu-bupt
+        baseurl: https://mirrors.bupt.edu.cn/ubuntu
+      - name: ubuntu-neu
+        baseurl: https://mirrors.neu.edu.cn/ubuntu
+      - name: ubuntu-cqu
+        baseurl: https://mirrors.cqu.edu.cn/ubuntu
+      - name: ubuntu-dlut
+        baseurl: https://mirrors.dlut.edu.cn/ubuntu
+      - name: ubuntu-njupt
+        baseurl: https://mirrors.njupt.edu.cn/ubuntu
+      - name: ubuntu-sdu
+        baseurl: https://mirrors.sdu.edu.cn/ubuntu
+      - name: ubuntu-cernet
+        baseurl: https://mirrors.cernet.edu.cn/ubuntu
+      - name: ubuntu-netease
+        baseurl: https://mirrors.163.com/ubuntu
+      - name: ubuntu-official
+        baseurl: http://archive.ubuntu.com/ubuntu
+      - name: ubuntu-us
+        baseurl: http://us.archive.ubuntu.com/ubuntu
+      - name: ubuntu-cn
+        baseurl: http://cn.archive.ubuntu.com/ubuntu
+      - name: ubuntu-jp
+        baseurl: http://jp.archive.ubuntu.com/ubuntu
+      - name: ubuntu-kr
+        baseurl: http://kr.archive.ubuntu.com/ubuntu
+      - name: ubuntu-tw
+        baseurl: http://tw.archive.ubuntu.com/ubuntu
+      - name: ubuntu-kernel
+        baseurl: https://mirrors.kernel.org/ubuntu
+      - name: ubuntu-waterloo
+        baseurl: https://mirror.csclub.uwaterloo.ca/ubuntu
+      - name: ubuntu-osuosl
+        baseurl: https://ftp.osuosl.org/pub/ubuntu
+      - name: ubuntu-ocf
+        baseurl: https://mirrors.ocf.berkeley.edu/ubuntu
+      - name: ubuntu-mit
+        baseurl: https://mirrors.mit.edu/ubuntu
+      - name: ubuntu-princeton
+        baseurl: https://mirror.math.princeton.edu/pub/ubuntu
+      - name: ubuntu-riken
+        baseurl: https://ftp.riken.jp/Linux/ubuntu
+      - name: ubuntu-jaist
+        baseurl: https://ftp.jaist.ac.jp/pub/Linux/ubuntu
+      - name: ubuntu-kakao
+        baseurl: https://mirror.kakao.com/ubuntu
+      - name: ubuntu-fau
+        baseurl: https://ftp.fau.de/ubuntu
+      - name: ubuntu-rwth
+        baseurl: https://ftp.halifax.rwth-aachen.de/ubuntu
+      - name: ubuntu-yandex
+        baseurl: https://mirror.yandex.ru/ubuntu
+      - name: ubuntu-dotsrc
+        baseurl: https://mirrors.dotsrc.org/ubuntu
+      - name: ubuntu-wikimedia
+        baseurl: https://mirrors.wikimedia.org/ubuntu
+      - name: ubuntu-leaseweb
+        baseurl: https://mirror.leaseweb.com/ubuntu
+      - name: ubuntu-gwdg
+        baseurl: http://ftp.gwdg.de/pub/linux/ubuntu
+      - name: ubuntu-hetzner
+        baseurl: https://mirror.hetzner.com/ubuntu/packages
+      - name: ubuntu-aarnet
+        baseurl: https://mirror.aarnet.edu.au/pub/ubuntu/archive
+      - name: ubuntu-nchc
+        baseurl: https://free.nchc.org.tw/ubuntu
+      - name: ubuntu-ufpr
+        baseurl: https://ubuntu.c3sl.ufpr.br/ubuntu
+      - name: ubuntu-constant
+        baseurl: https://ubuntu.mirror.constant.com
+      - name: ubuntu-digitalocean
+        baseurl: https://mirrors.digitalocean.com/ubuntu

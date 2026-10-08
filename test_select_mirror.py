@@ -15,7 +15,9 @@ from select_mirror import (
     Mirror,
     ProbeConfig,
     ProbeResult,
+    activate,
     build_curl_command,
+    detect,
     load_config,
     main,
     make_curl_runner,
@@ -29,22 +31,36 @@ from select_mirror import (
 
 SAMPLE = """
 # candidates
-suite: jammy
 probe:
   connect_timeout_sec: 1
   max_time_sec: 2
   deadline_sec: 5
-mirrors:
-  - name: aliyun
-    baseurl: https://mirrors.aliyun.com/ubuntu/
-  - name: official
-    baseurl: http://archive.ubuntu.com/ubuntu
+release:
+  - etc
+  - os-release
+distros:
+  - id: ubuntu
+    match: ubuntu linuxmint
+    suite_keys: UBUNTU_CODENAME VERSION_CODENAME
+    probe_path: dists/{suite}/InRelease
+    marker: "Codename: {suite}"
+    bases: http://security.ubuntu.com/ubuntu https://security.ubuntu.com/ubuntu
+    sources: etc apt sources.list
+    mirrors:
+      - name: aliyun
+        baseurl: https://mirrors.aliyun.com/ubuntu/
+      - name: official
+        baseurl: http://archive.ubuntu.com/ubuntu
 """
+
+
+def sample_config(distro="ubuntu", suite="jammy"):
+    return activate(load_config(SAMPLE), distro, suite)
 
 
 class LoadConfigTest(unittest.TestCase):
     def test_parses_sample_and_strips_slash(self):
-        config = load_config(SAMPLE)
+        config = sample_config()
         self.assertEqual(config.suite, "jammy")
         self.assertEqual(config.probe.connect_timeout_sec, 1)
         self.assertEqual(config.probe.max_time_sec, 2)
@@ -52,20 +68,46 @@ class LoadConfigTest(unittest.TestCase):
         self.assertEqual(config.mirrors[0].name, "aliyun")
         self.assertEqual(config.mirrors[0].baseurl, "https://mirrors.aliyun.com/ubuntu")
         self.assertEqual(
-            probe_url(config.mirrors[0], config.suite),
+            probe_url(config.mirrors[0], config.suite, config.probe_path),
             "https://mirrors.aliyun.com/ubuntu/dists/jammy/InRelease",
         )
 
-    def test_shipped_file_has_seven_mirrors(self):
+    def test_shipped_file_covers_families_without_absolute_paths(self):
         text = Path("mirrors.yaml").read_text(encoding="utf-8")
-        config = load_config(text)
+        for token in ("/home/", "/etc/", "/usr/", "/tmp/", "/var/"):
+            self.assertNotIn(token, text)
+        catalog = load_config(text)
+        ids = [profile.id for profile in catalog.profiles]
+        for required in ("ubuntu", "debian", "fedora", "arch", "opensuse-leap", "rocky", "alpine", "kali"):
+            self.assertIn(required, ids)
+        ubuntu = next(profile for profile in catalog.profiles if profile.id == "ubuntu")
+        debian = next(profile for profile in catalog.profiles if profile.id == "debian")
+        self.assertGreaterEqual(len(ubuntu.mirrors), 40)
+        self.assertGreaterEqual(len(debian.mirrors), 20)
+        for profile in catalog.profiles:
+            self.assertNotIn("x86_64", profile.probe_path)
+            self.assertNotIn("aarch64", profile.probe_path)
+            self.assertNotIn("amd64", profile.probe_path)
+            if not profile.fixed_suite:
+                self.assertIn("{suite}", profile.probe_path)
+        self.assertEqual(detect(catalog, "ID=debian\nVERSION_CODENAME=trixie\n"), ("debian", "trixie"))
+        self.assertEqual(detect(catalog, "ID=fedora\nVERSION_ID=41\n"), ("fedora", "41"))
+        self.assertEqual(detect(catalog, "ID=arch\n"), ("arch", "rolling"))
         self.assertEqual(
-            [mirror.name for mirror in config.mirrors],
-            ["aliyun", "huaweicloud", "tencent", "bfsu", "ustc", "tuna", "official"],
+            detect(catalog, "ID=ubuntu\nVERSION_CODENAME=noble\n"),
+            ("ubuntu", "noble"),
         )
 
+    def test_derivative_uses_upstream_codename(self):
+        catalog = load_config(SAMPLE)
+        distro, suite = detect(
+            catalog,
+            "ID=linuxmint\nVERSION_CODENAME=xia\nUBUNTU_CODENAME=noble\nID_LIKE=ubuntu\n",
+        )
+        self.assertEqual((distro, suite), ("ubuntu", "noble"))
+
     def test_missing_baseurl_is_rejected(self):
-        text = SAMPLE.replace("    baseurl: http://archive.ubuntu.com/ubuntu\n", "")
+        text = SAMPLE.replace("        baseurl: http://archive.ubuntu.com/ubuntu\n", "")
         with self.assertRaises(ConfigError):
             load_config(text)
 
@@ -92,7 +134,7 @@ def _result(name, baseurl, time_total, http_code=200, returncode=0, body="Codena
 
 class SelectWinnerTest(unittest.TestCase):
     def setUp(self):
-        self.config = load_config(SAMPLE)
+        self.config = sample_config()
 
     def test_lowest_time_wins(self):
         winner = select_winner(
@@ -130,7 +172,7 @@ deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted
 deb-src http://archive.ubuntu.com/ubuntu/ jammy universe
 # deb-src http://archive.ubuntu.com/ubuntu/ jammy main restricted
 deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
-deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
+deb [arch=amd64] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
 deb https://mirrors.ustc.edu.cn/ubuntu/ jammy multiverse
 """
 
@@ -143,7 +185,12 @@ class RewriteSourcesTest(unittest.TestCase):
             Mirror("official", "http://archive.ubuntu.com/ubuntu"),
         )
         winner = mirrors[0]
-        text, changed = rewrite_sources(SOURCES, mirrors, winner)
+        text, changed = rewrite_sources(
+            SOURCES,
+            mirrors,
+            winner,
+            bases=("http://security.ubuntu.com/ubuntu", "https://security.ubuntu.com/ubuntu"),
+        )
         self.assertTrue(changed)
         self.assertEqual(
             text,
@@ -153,10 +200,37 @@ deb https://mirrors.aliyun.com/ubuntu/ jammy-security main restricted
 deb-src https://mirrors.aliyun.com/ubuntu/ jammy universe
 # deb-src http://archive.ubuntu.com/ubuntu/ jammy main restricted
 deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
-deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
+deb [arch=amd64] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
 deb https://mirrors.aliyun.com/ubuntu/ jammy multiverse
 """,
         )
+
+    def test_replaces_fedora_baseurl_prefix(self):
+        mirrors = (Mirror("fedora-aliyun", "https://mirrors.aliyun.com/fedora"),)
+        original = "baseurl=https://download.fedoraproject.org/pub/fedora/linux/releases/41/Everything/$basearch/os/\n"
+        text, changed = rewrite_sources(
+            original,
+            mirrors,
+            mirrors[0],
+            bases=("https://download.fedoraproject.org/pub/fedora/linux",),
+        )
+        self.assertTrue(changed)
+        self.assertEqual(
+            text,
+            "baseurl=https://mirrors.aliyun.com/fedora/releases/41/Everything/$basearch/os/\n",
+        )
+
+    def test_leaves_debian_security_path(self):
+        mirrors = (Mirror("debian-aliyun", "https://mirrors.aliyun.com/debian"),)
+        original = "deb http://security.debian.org/debian-security bookworm-security main\n"
+        text, changed = rewrite_sources(
+            original,
+            mirrors,
+            mirrors[0],
+            bases=("https://deb.debian.org/debian",),
+        )
+        self.assertFalse(changed)
+        self.assertEqual(text, original)
 
     def test_unchanged_when_already_winner(self):
         mirrors = (Mirror("official", "http://archive.ubuntu.com/ubuntu"),)
@@ -168,8 +242,8 @@ deb https://mirrors.aliyun.com/ubuntu/ jammy multiverse
 
 class ProbeAllTest(unittest.TestCase):
     def test_curl_command_matches_spec(self):
-        config = load_config(SAMPLE)
-        command = build_curl_command(config.mirrors[0], config, "/tmp/inrelease")
+        config = sample_config()
+        command = build_curl_command(config.mirrors[0], config, "inrelease")
         self.assertEqual(
             command,
             [
@@ -183,7 +257,7 @@ class ProbeAllTest(unittest.TestCase):
                 "--max-time",
                 "2",
                 "--output",
-                "/tmp/inrelease",
+                "inrelease",
                 "--write-out",
                 "%{http_code} %{time_total}",
                 "https://mirrors.aliyun.com/ubuntu/dists/jammy/InRelease",
@@ -242,7 +316,7 @@ class ProbeAllTest(unittest.TestCase):
         self.assertEqual([result.mirror.name for result in results], ["aliyun"])
 
     def test_curl_missing_unlinks_temp_and_prints_once(self):
-        config = load_config(SAMPLE)
+        config = sample_config()
         session = CurlSession()
         runner = make_curl_runner(config, session)
         created_paths: list[str] = []
@@ -309,7 +383,16 @@ class MainTest(unittest.TestCase):
         self.directory.rmdir()
 
     def _args(self):
-        return ["--config", str(self.config_path), "--sources", str(self.sources)]
+        return [
+            "--config",
+            str(self.config_path),
+            "--sources",
+            str(self.sources),
+            "--distro",
+            "ubuntu",
+            "--suite",
+            "jammy",
+        ]
 
     def test_dry_run_prints_and_does_not_write(self):
         stdout = io.StringIO()
