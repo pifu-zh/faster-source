@@ -105,10 +105,18 @@ class CurlSession:
     def __init__(self) -> None:
         self._procs: list[subprocess.Popen] = []
         self._lock = threading.Lock()
+        self._curl_start_error_reported = False
 
     def add(self, proc: subprocess.Popen) -> None:
         with self._lock:
             self._procs.append(proc)
+
+    def report_curl_start_failure(self, exc: BaseException) -> None:
+        with self._lock:
+            if self._curl_start_error_reported:
+                return
+            print(f"error: curl: {exc}", file=sys.stderr)
+            self._curl_start_error_reported = True
 
     def kill_all(self) -> None:
         with self._lock:
@@ -120,32 +128,52 @@ class CurlSession:
                         continue
 
 
+def _invalid_probe_result(mirror: Mirror) -> ProbeResult:
+    return ProbeResult(
+        mirror=mirror,
+        http_code=0,
+        time_total=float("inf"),
+        body="",
+        returncode=1,
+    )
+
+
 def make_curl_runner(config: Config, session: CurlSession) -> Callable[[Mirror], ProbeResult]:
     def runner(mirror: Mirror) -> ProbeResult:
         handle = tempfile.NamedTemporaryFile(prefix=f"fs-{mirror.name}-", delete=False)
         output_path = handle.name
         handle.close()
-        command = build_curl_command(mirror, config, output_path)
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        session.add(proc)
-        stdout, _stderr = proc.communicate()
         try:
-            body = open(output_path, encoding="utf-8", errors="replace").read()
-        except OSError:
-            body = ""
+            command = build_curl_command(mirror, config, output_path)
+            try:
+                proc = subprocess.Popen(
+                    command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                )
+            except FileNotFoundError as exc:
+                session.report_curl_start_failure(exc)
+                return _invalid_probe_result(mirror)
+            session.add(proc)
+            try:
+                stdout, _stderr = proc.communicate()
+            except Exception:
+                return _invalid_probe_result(mirror)
+            try:
+                body = open(output_path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                body = ""
+            http_code, time_total = parse_write_out(stdout or "")
+            return ProbeResult(
+                mirror=mirror,
+                http_code=http_code,
+                time_total=time_total,
+                body=body,
+                returncode=proc.returncode if proc.returncode is not None else 1,
+            )
         finally:
             try:
                 os.unlink(output_path)
             except OSError:
                 pass
-        http_code, time_total = parse_write_out(stdout or "")
-        return ProbeResult(
-            mirror=mirror,
-            http_code=http_code,
-            time_total=time_total,
-            body=body,
-            returncode=proc.returncode if proc.returncode is not None else 1,
-        )
 
     return runner
 

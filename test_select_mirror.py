@@ -1,5 +1,6 @@
 import io
 import os
+import tempfile
 import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -17,6 +18,7 @@ from select_mirror import (
     build_curl_command,
     load_config,
     main,
+    make_curl_runner,
     parse_write_out,
     probe_all,
     probe_url,
@@ -55,7 +57,7 @@ class LoadConfigTest(unittest.TestCase):
         )
 
     def test_shipped_file_has_seven_mirrors(self):
-        text = open("mirrors.yaml", encoding="utf-8").read()
+        text = Path("mirrors.yaml").read_text(encoding="utf-8")
         config = load_config(text)
         self.assertEqual(
             [mirror.name for mirror in config.mirrors],
@@ -238,6 +240,35 @@ class ProbeAllTest(unittest.TestCase):
         results = probe_all(config, runner, clock=lambda: 0.0, on_timeout=on_timeout)
         release.set()
         self.assertEqual([result.mirror.name for result in results], ["aliyun"])
+
+    def test_curl_missing_unlinks_temp_and_prints_once(self):
+        config = load_config(SAMPLE)
+        session = CurlSession()
+        runner = make_curl_runner(config, session)
+        created_paths: list[str] = []
+        real_named_temp = tempfile.NamedTemporaryFile
+
+        def tracking_named_temp(*args, **kwargs):
+            handle = real_named_temp(*args, **kwargs)
+            created_paths.append(handle.name)
+            return handle
+
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), mock.patch(
+            "select_mirror.tempfile.NamedTemporaryFile", tracking_named_temp
+        ), mock.patch(
+            "select_mirror.subprocess.Popen",
+            side_effect=FileNotFoundError(2, "No such file or directory: 'curl'"),
+        ):
+            results = probe_all(config, runner, clock=lambda: 0.0)
+        for path in created_paths:
+            self.assertFalse(os.path.exists(path), path)
+        err = stderr.getvalue()
+        self.assertEqual(err.count("error: curl:"), 1)
+        self.assertEqual(len(results), len(config.mirrors))
+        for result in results:
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.body, "")
 
     def test_kill_all_continues_after_process_lookup_error(self):
         class FakeProc:
