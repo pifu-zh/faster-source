@@ -3,15 +3,19 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -314,3 +318,74 @@ def _positive_int(value: str, lineno: int, fail) -> int:
     if not value.isdigit() or value.startswith("0"):
         fail(lineno, f"expected a positive integer, got {value}")
     return int(value)
+
+
+def apply_sources(path: Path, new_text: str, stamp: str) -> None:
+    backup = path.with_name(f"{path.name}.bak.{stamp}")
+    original = path.read_bytes()
+    mode = path.stat().st_mode
+    backup.write_bytes(original)
+    tmp = path.with_name(f"{path.name}.tmp.{stamp}")
+    try:
+        tmp.write_bytes(new_text.encode("utf-8"))
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
+def main(
+    argv: list[str] | None = None,
+    runner: Callable[[Mirror], ProbeResult] | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    now: Callable[[], datetime] | None = None,
+) -> int:
+    if now is None:
+        now = datetime.now
+    parser = argparse.ArgumentParser(prog="select_mirror.py")
+    parser.add_argument("--config", type=Path, default=Path(__file__).resolve().parent / "mirrors.yaml")
+    parser.add_argument("--sources", type=Path, default=Path("/etc/apt/sources.list"))
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+    start = clock()
+    try:
+        config = load_config(args.config.read_text(encoding="utf-8"))
+    except (OSError, ConfigError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not args.sources.is_file():
+        print("error: sources file not found", file=sys.stderr)
+        return 4
+    if runner is None:
+        session = CurlSession()
+        runner = make_curl_runner(config, session)
+        results = probe_all(config, runner, clock=clock, on_timeout=session.kill_all)
+    else:
+        results = probe_all(config, runner, clock=clock)
+    winner = select_winner(results, config)
+    if winner is None:
+        print("selected none", file=sys.stderr)
+        return 1
+    print(
+        f"selected name={winner.mirror.name} baseurl={winner.mirror.baseurl} time_total={winner.time_total:.6f}",
+        file=sys.stderr,
+    )
+    if clock() - start > config.probe.deadline_sec:
+        return 3
+    new_text, changed = rewrite_sources(args.sources.read_text(encoding="utf-8"), config.mirrors, winner.mirror)
+    if not changed:
+        return 0
+    if args.dry_run or not os.access(args.sources, os.W_OK):
+        sys.stdout.write(new_text)
+        return 0
+    try:
+        apply_sources(args.sources, new_text, now().strftime("%Y%m%d%H%M%S"))
+    except OSError:
+        return 4
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

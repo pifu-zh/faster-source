@@ -1,5 +1,11 @@
+import io
+import os
 import threading
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime
+from pathlib import Path
+from unittest import mock
 
 from select_mirror import (
     Config,
@@ -10,6 +16,7 @@ from select_mirror import (
     ProbeResult,
     build_curl_command,
     load_config,
+    main,
     parse_write_out,
     probe_all,
     probe_url,
@@ -254,6 +261,121 @@ class ProbeAllTest(unittest.TestCase):
         session.kill_all()
         self.assertTrue(first.kill_called)
         self.assertTrue(second.kill_called)
+
+
+class MainTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = Path("test-tmp-sources")
+        self.directory.mkdir(exist_ok=True)
+        self.sources = self.directory / "sources.list"
+        self.sources.write_text(SOURCES, encoding="utf-8")
+        self.config_path = self.directory / "mirrors.yaml"
+        self.config_path.write_text(SAMPLE, encoding="utf-8")
+
+    def tearDown(self):
+        for path in self.directory.iterdir():
+            path.unlink()
+        self.directory.rmdir()
+
+    def _args(self):
+        return ["--config", str(self.config_path), "--sources", str(self.sources)]
+
+    def test_dry_run_prints_and_does_not_write(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            code = main(
+                self._args() + ["--dry-run"],
+                runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.2 if mirror.name == "aliyun" else 0.9),
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("https://mirrors.aliyun.com/ubuntu/", stdout.getvalue())
+        self.assertIn("selected name=aliyun", stderr.getvalue())
+        self.assertIn("time_total=0.200000", stderr.getvalue())
+        self.assertEqual(self.sources.read_text(encoding="utf-8"), SOURCES)
+        self.assertEqual(list(self.directory.glob("sources.list.bak.*")), [])
+
+    def test_apply_writes_backup(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            code = main(
+                self._args(),
+                runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.2 if mirror.name == "aliyun" else 0.9),
+                now=lambda: datetime(2026, 10, 8, 14, 23, 0),
+            )
+        self.assertEqual(code, 0)
+        backup = self.directory / "sources.list.bak.20261008142300"
+        self.assertEqual(backup.read_text(encoding="utf-8"), SOURCES)
+        self.assertIn("deb https://mirrors.aliyun.com/ubuntu/ jammy main restricted\n", self.sources.read_text(encoding="utf-8"))
+        self.assertIn("developer.download.nvidia.com", self.sources.read_text(encoding="utf-8"))
+
+    def test_already_winner_does_not_write(self):
+        self.sources.write_text("deb https://mirrors.aliyun.com/ubuntu/ jammy main restricted\n", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            code = main(
+                self._args(),
+                runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.2 if mirror.name == "aliyun" else 0.9),
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(list(self.directory.glob("sources.list.bak.*")), [])
+
+    def test_no_valid_probe_leaves_file(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            code = main(self._args(), runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.2, returncode=28))
+        self.assertEqual(code, 1)
+        self.assertIn("selected none", stderr.getvalue())
+        self.assertEqual(self.sources.read_text(encoding="utf-8"), SOURCES)
+
+    def test_bad_yaml_exits_2(self):
+        self.config_path.write_text("suite:\n", encoding="utf-8")
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            code = main(self._args(), runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.1))
+        self.assertEqual(code, 2)
+        self.assertTrue(stderr.getvalue().startswith("error:"))
+
+    def test_missing_sources_exits_4(self):
+        self.sources.unlink()
+        code = main(self._args(), runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.1))
+        self.assertEqual(code, 4)
+        self.assertFalse(self.sources.exists())
+
+    def test_deadline_miss_does_not_write(self):
+        state = {"now": 0.0}
+
+        def clock():
+            return state["now"]
+
+        def runner(mirror):
+            state["now"] = 100.0
+            return _result(mirror.name, mirror.baseurl, 0.1)
+
+        with redirect_stderr(io.StringIO()):
+            code = main(self._args(), runner=runner, clock=clock)
+        self.assertEqual(code, 3)
+        self.assertEqual(self.sources.read_text(encoding="utf-8"), SOURCES)
+
+    def test_unwritable_prints_like_dry_run(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(io.StringIO()), mock.patch("select_mirror.os.access", return_value=False):
+            code = main(
+                self._args(),
+                runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.2 if mirror.name == "aliyun" else 0.9),
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("https://mirrors.aliyun.com/ubuntu/", stdout.getvalue())
+        self.assertEqual(self.sources.read_text(encoding="utf-8"), SOURCES)
+
+    def test_replace_failure_exits_4_and_keeps_original(self):
+        with redirect_stderr(io.StringIO()), mock.patch("select_mirror.os.replace", side_effect=OSError("disk")):
+            code = main(
+                self._args(),
+                runner=lambda mirror: _result(mirror.name, mirror.baseurl, 0.2 if mirror.name == "aliyun" else 0.9),
+                now=lambda: datetime(2026, 10, 8, 14, 23, 1),
+            )
+        self.assertEqual(code, 4)
+        self.assertEqual(self.sources.read_text(encoding="utf-8"), SOURCES)
 
 
 if __name__ == "__main__":
