@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 
 class ConfigError(ValueError):
@@ -57,6 +59,43 @@ def select_winner(results: list[ProbeResult], config: Config) -> ProbeResult | N
 
 def probe_url(mirror: Mirror, suite: str) -> str:
     return f"{mirror.baseurl}/dists/{suite}/InRelease"
+
+
+_DEB_RE = re.compile(r"^(?P<type>deb(?:-src)?)(?P<sp>\s+)(?P<uri>\S+)(?P<rest>\s+.*)$")
+
+
+def rewrite_sources(
+    text: str, mirrors: tuple[Mirror, ...], winner: Mirror
+) -> tuple[str, bool]:
+    winner_uri = winner.baseurl.rstrip("/") + "/"
+    hosts = {"archive.ubuntu.com", "security.ubuntu.com"}
+    for mirror in mirrors:
+        hostname = urlparse(mirror.baseurl).hostname
+        if hostname:
+            hosts.add(hostname)
+    changed = False
+    lines = []
+    for line in text.splitlines(keepends=True):
+        body = line[:-1] if line.endswith("\n") else line
+        newline = "\n" if line.endswith("\n") else ""
+        stripped = body.lstrip()
+        if stripped.startswith("#") or re.match(r"deb(?:-src)?\s+\[", stripped):
+            lines.append(line)
+            continue
+        match = _DEB_RE.match(body)
+        if not match:
+            lines.append(line)
+            continue
+        uri = match.group("uri")
+        if urlparse(uri).hostname not in hosts:
+            lines.append(line)
+            continue
+        if uri != winner_uri:
+            changed = True
+        lines.append(
+            f"{match.group('type')}{match.group('sp')}{winner_uri}{match.group('rest')}{newline}"
+        )
+    return "".join(lines), changed
 
 
 def load_config(text: str) -> Config:

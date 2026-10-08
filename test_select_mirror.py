@@ -1,6 +1,14 @@
 import unittest
 
-from select_mirror import ConfigError, Mirror, ProbeResult, load_config, probe_url, select_winner
+from select_mirror import (
+    ConfigError,
+    Mirror,
+    ProbeResult,
+    load_config,
+    probe_url,
+    rewrite_sources,
+    select_winner,
+)
 
 
 SAMPLE = """
@@ -98,6 +106,48 @@ class SelectWinnerTest(unittest.TestCase):
             _result("official", "http://archive.ubuntu.com/ubuntu", 0.4, body="note Codename: jammy inside\n"),
         ]
         self.assertIsNone(select_winner(results, self.config))
+
+
+SOURCES = """\
+deb http://archive.ubuntu.com/ubuntu/ jammy main restricted
+deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted
+deb-src http://archive.ubuntu.com/ubuntu/ jammy universe
+# deb-src http://archive.ubuntu.com/ubuntu/ jammy main restricted
+deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
+deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
+deb https://mirrors.ustc.edu.cn/ubuntu/ jammy multiverse
+"""
+
+
+class RewriteSourcesTest(unittest.TestCase):
+    def test_replaces_archive_security_and_known_mirror(self):
+        mirrors = (
+            Mirror("aliyun", "https://mirrors.aliyun.com/ubuntu"),
+            Mirror("ustc", "https://mirrors.ustc.edu.cn/ubuntu"),
+            Mirror("official", "http://archive.ubuntu.com/ubuntu"),
+        )
+        winner = mirrors[0]
+        text, changed = rewrite_sources(SOURCES, mirrors, winner)
+        self.assertTrue(changed)
+        self.assertEqual(
+            text,
+            """\
+deb https://mirrors.aliyun.com/ubuntu/ jammy main restricted
+deb https://mirrors.aliyun.com/ubuntu/ jammy-security main restricted
+deb-src https://mirrors.aliyun.com/ubuntu/ jammy universe
+# deb-src http://archive.ubuntu.com/ubuntu/ jammy main restricted
+deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
+deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /
+deb https://mirrors.aliyun.com/ubuntu/ jammy multiverse
+""",
+        )
+
+    def test_unchanged_when_already_winner(self):
+        mirrors = (Mirror("official", "http://archive.ubuntu.com/ubuntu"),)
+        original = "deb http://archive.ubuntu.com/ubuntu/ jammy main restricted\n"
+        text, changed = rewrite_sources(original, mirrors, mirrors[0])
+        self.assertFalse(changed)
+        self.assertEqual(text, original)
 
 
 if __name__ == "__main__":
